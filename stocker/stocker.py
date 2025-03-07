@@ -8,6 +8,7 @@ import prophet
 import matplotlib.pyplot as plt
 
 import matplotlib
+matplotlib.use('TkAgg')
 
 # Class for analyzing and (attempting) to predict future prices
 # Contains a number of visualizations and analysis methods
