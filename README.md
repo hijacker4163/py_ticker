@@ -78,3 +78,6 @@ pip install numpy pandas
 ```
 或透過 `File -> Settings -> Project: <你的專案名稱> -> Python Interpreter` 來管理套件。
 
+
+### 引用
+stocker 取自 https://github.com/WillKoehrsen/Data-Analysis
