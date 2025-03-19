@@ -3,12 +3,25 @@
 import pandas as pd
 import numpy as np
 import prophet
+import os
 
 # matplotlib pyplot for plotting
 import matplotlib.pyplot as plt
 
 import matplotlib
-matplotlib.use('TkAgg')
+# matplotlib.use('TkAgg')
+
+from matplotlib.font_manager import fontManager
+base_dir = os.path.dirname(os.path.abspath(__file__))
+font_path = os.path.join(base_dir, "HiraginoSansGBW6.otf")
+# 設定字型
+fontManager.addfont(font_path)
+
+# fontManager.addfont('/Users/A13017/Documents/GitHub/py_ticker/stocker/TaipeiSansTCBeta-Regular.ttf')
+# matplotlib.rc('font', family='Taipei Sans TC Beta')
+# fontManager.addfont('HiraginoSansGBW6.otf')
+# matplotlib.rc('font', family='Hiragino Sans GB')
+# plt.rcParams['font.sans-serif'] = ['Taipei Sans TC Beta'] 
 
 # Class for analyzing and (attempting) to predict future prices
 # Contains a number of visualizations and analysis methods
@@ -64,9 +77,9 @@ class Stocker():
         self.yearly_seasonality = True
         self.changepoints = None
         
-        print('{} Stocker Initialized. Data covers {} to {}.'.format(self.symbol,
-                                                                     self.min_date,
-                                                                     self.max_date))
+        # print('{} Stocker Initialized. Data covers {} to {}.'.format(self.symbol,
+        #                                                              self.min_date,
+        #                                                              self.max_date))
     
     """
     Make sure start and end dates are in the range and can be
@@ -179,11 +192,11 @@ class Stocker():
                     
                 # Check to make sure dates are in the data
                 if (start_date not in list(df['Date'])):
-                    print('Start Date not in data (either out of range or not a trading day.)')
+                    # print('Start Date not in data (either out of range or not a trading day.)')
                     start_date = pd.to_datetime(input(prompt='Enter a new start date: '))
                     
                 elif (end_date not in list(df['Date'])):
-                    print('End Date not in data (either out of range or not a trading day.)')
+                    # print('End Date not in data (either out of range or not a trading day.)')
                     end_date = pd.to_datetime(input(prompt='Enter a new end date: ') )
 
             # Dates are not rounded
@@ -433,8 +446,8 @@ class Stocker():
         
         if days > 0:
             # Print the predicted price
-            print('Predicted Price on {} = ${:.2f}'.format(
-                future['ds'].iloc[len(future) - 1], future['yhat'].iloc[len(future) - 1]))
+            # print('Predicted Price on {} = ${:.2f}'.format(
+            #     future['ds'].iloc[len(future) - 1], future['yhat'].iloc[len(future) - 1]))
 
             title = '%s 歷史和預測股價'  % self.symbol
         else:
@@ -456,6 +469,7 @@ class Stocker():
         # Plot formatting
         # plt.rcParams['font.sans-serif'] = ['SimHei']
         plt.rcParams['font.sans-serif'] = ['Hiragino Sans'] 
+        # plt.rcParams['font.sans-serif'] = ['Taipei Sans TC Beta'] 
 
         plt.legend(loc = 2, prop={'size': 10}); plt.xlabel('Date'); plt.ylabel('Price $');
         plt.grid(linewidth=0.6, alpha = 0.6)
@@ -526,21 +540,21 @@ class Stocker():
         if not nshares:
 
             # Date range of predictions
-            print('\nPrediction Range: {} to {}.'.format(start_date,
-                end_date))
+            # print('\nPrediction Range: {} to {}.'.format(start_date,
+            #     end_date))
 
             # Final prediction vs actual value
-            print('\nPredicted price on {} = ${:.2f}.'.format(max(future['ds']), future['yhat'].iloc[len(future) - 1]))
-            print('Actual price on    {} = ${:.2f}.\n'.format(max(test['ds']), test['y'].iloc[len(test) - 1]))
+            # print('\nPredicted price on {} = ${:.2f}.'.format(max(future['ds']), future['yhat'].iloc[len(future) - 1]))
+            # print('Actual price on    {} = ${:.2f}.\n'.format(max(test['ds']), test['y'].iloc[len(test) - 1]))
 
-            print('Average Absolute Error on Training Data = ${:.2f}.'.format(train_mean_error))
-            print('Average Absolute Error on Testing  Data = ${:.2f}.\n'.format(test_mean_error))
+            # print('Average Absolute Error on Training Data = ${:.2f}.'.format(train_mean_error))
+            # print('Average Absolute Error on Testing  Data = ${:.2f}.\n'.format(test_mean_error))
 
             # Direction accuracy
-            print('When the model predicted an increase, the price increased {:.2f}% of the time.'.format(increase_accuracy))
-            print('When the model predicted a  decrease, the price decreased  {:.2f}% of the time.\n'.format(decrease_accuracy))
+            # print('When the model predicted an increase, the price increased {:.2f}% of the time.'.format(increase_accuracy))
+            # print('When the model predicted a  decrease, the price decreased  {:.2f}% of the time.\n'.format(decrease_accuracy))
 
-            print('The actual value was within the {:d}% confidence interval {:.2f}% of the time.'.format(int(100 * model.interval_width), in_range_accuracy))
+            # print('The actual value was within the {:d}% confidence interval {:.2f}% of the time.'.format(int(100 * model.interval_width), in_range_accuracy))
 
 
              # Reset the plot
@@ -603,16 +617,16 @@ class Stocker():
             test['hold_profit'] = nshares * (test['y'] - float(test['y'].iloc[0]))
             
             # Display information
-            print('You played the stock market in {} from {} to {} with {} shares.\n'.format(
-                self.symbol, start_date, end_date, nshares))
+            # print('You played the stock market in {} from {} to {} with {} shares.\n'.format(
+            #     self.symbol, start_date, end_date, nshares))
             
-            print('When the model predicted an increase, the price increased {:.2f}% of the time.'.format(increase_accuracy))
-            print('When the model predicted a  decrease, the price decreased  {:.2f}% of the time.\n'.format(decrease_accuracy))
+            # print('When the model predicted an increase, the price increased {:.2f}% of the time.'.format(increase_accuracy))
+            # print('When the model predicted a  decrease, the price decreased  {:.2f}% of the time.\n'.format(decrease_accuracy))
 
             # Display some friendly information about the perils of playing the stock market
-            print('The total profit using the Prophet model = ${:.2f}.'.format(np.sum(prediction_profit)))
-            print('The Buy and Hold strategy profit =         ${:.2f}.'.format(float(test['hold_profit'].iloc[len(test) - 1])))
-            print('\nThanks for playing the stock market!\n')
+            # print('The total profit using the Prophet model = ${:.2f}.'.format(np.sum(prediction_profit)))
+            # print('The Buy and Hold strategy profit =         ${:.2f}.'.format(float(test['hold_profit'].iloc[len(test) - 1])))
+            # print('\nThanks for playing the stock market!\n')
             
            
             
