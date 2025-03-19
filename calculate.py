@@ -1,3 +1,23 @@
+import yfinance as yf
+
+from twstock import Stock
+from twstock import BestFourPoint
+import twstock
+
+def get_stock_data(ticker, period="60d", interval="1d"):
+    twTicker = f"{ticker}.TW"
+    stock_data = yf.download(twTicker, period=period, interval=interval)  # 最近60天資料
+    return stock_data
+
+def get_four_points(ticker):
+    # 解析四大買賣點
+    tw_stock = Stock(str(ticker))
+    bfp = BestFourPoint(tw_stock)
+    buy_reason = bfp.best_four_point_to_buy()  # 判斷是否為四大買點
+    sell_reason = bfp.best_four_point_to_sell()  # 判斷是否為四大賣點
+    complex_reason = bfp.best_four_point()
+    return buy_reason, sell_reason, complex_reason
+
 def calculate_macd(stock_data):
     # 計算 12日和 26日指數移動平均線 (EMA)
     stock_data['EMA_12'] = stock_data['Close'].ewm(span=12, adjust=False).mean()  # 快速線
@@ -156,7 +176,7 @@ def decision_based_on_volume(latest_volume, latest_mav, volume_ratio, pvt, cmf, 
         sell_votes += 1
     else:
         print("No decision")
-        
+
     # if obv > prev_obv:
     #     buy_votes += 1
     # else:
