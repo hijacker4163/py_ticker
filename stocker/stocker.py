@@ -463,8 +463,10 @@ class Stocker():
         ax.plot(future['ds'], future['yhat'], 'forestgreen',linewidth = 2.4, label = '預測線');
 
         # Plot the uncertainty interval as ribbon
-        ax.fill_between(future['ds'].dt.to_pydatetime(), future['yhat_upper'], future['yhat_lower'], alpha = 0.3, 
-                       facecolor = 'g', edgecolor = 'k', linewidth = 1.4, label = '信賴區間')
+        # ax.fill_between(future['ds'].dt.to_pydatetime(), future['yhat_upper'], future['yhat_lower'], alpha = 0.3, 
+        #                facecolor = 'g', edgecolor = 'k', linewidth = 1.4, label = '信賴區間')
+        ax.fill_between(future['ds'].to_numpy(), future['yhat_upper'], future['yhat_lower'], alpha = 0.3, 
+                        facecolor = 'g', edgecolor = 'k', linewidth = 1.4, label = '信賴區間')
 
         # Plot formatting
         # plt.rcParams['font.sans-serif'] = ['SimHei']

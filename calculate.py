@@ -4,6 +4,8 @@ from twstock import Stock
 from twstock import BestFourPoint
 import twstock
 
+import matplotlib.pyplot as plt
+
 def get_stock_data(ticker, period="60d", interval="1d"):
     twTicker = f"{ticker}.TW"
     stock_data = yf.download(twTicker, period=period, interval=interval)  # 最近60天資料
@@ -19,25 +21,73 @@ def get_four_points(ticker):
     return buy_reason, sell_reason, complex_reason
 
 def calculate_macd(stock_data):
-    # 計算 12日和 26日指數移動平均線 (EMA)
-    stock_data['EMA_12'] = stock_data['Close'].ewm(span=12, adjust=False).mean()  # 快速線
-    stock_data['EMA_26'] = stock_data['Close'].ewm(span=26, adjust=False).mean()  # 慢速線
+    # 計算 12 日和 26 日指數移動平均線 (EMA)
+    stock_data['EMA_12'] = stock_data['Close'].ewm(span=12, adjust=False).mean()
+    stock_data['EMA_26'] = stock_data['Close'].ewm(span=26, adjust=False).mean()
 
-    # 計算 MACD 線和信號線
-    stock_data['MACD'] = stock_data['EMA_12'] - stock_data['EMA_26']  # MACD線
-    stock_data['Signal_Line'] = stock_data['MACD'].ewm(span=9, adjust=False).mean()  # 信號線
-
-    # 判斷是否為買入或賣出信號
-    latest_macd = stock_data['MACD'].iloc[-1]
-    latest_signal = stock_data['Signal_Line'].iloc[-1]
+    # 計算 MACD 線與信號線
+    stock_data['MACD'] = stock_data['EMA_12'] - stock_data['EMA_26']
+    stock_data['DEA'] = stock_data['MACD'].ewm(span=9, adjust=False).mean()    
     
-    # 如果 MACD 線穿越信號線，則為買入或賣出信號
-    if latest_macd > latest_signal:
-        return "買入"
-    elif latest_macd < latest_signal:
-        return "賣出"
+    # 計算 MACD 柱狀圖 (Histogram)
+    # stock_data['Histogram'] = stock_data['MACD'] - stock_data['DEA']
+    # 計算 MACD 差值
+    stock_data['DIFF'] = stock_data['MACD'] - stock_data['DEA']  
+    
+    msg = "\n最近一次"
+    """尋找最近一次 MACD 交叉點"""
+    for i in range(len(stock_data) - 1, 1, -1):  # 從最新數據往回找
+        prev_macd, prev_signal = stock_data['MACD'].iloc[i - 1], stock_data['DEA'].iloc[i - 1]
+        curr_macd, curr_signal = stock_data['MACD'].iloc[i], stock_data['DEA'].iloc[i]
+        date = stock_data.index[i].strftime('%Y-%m-%d')
+        # 黃金交叉 (MACD 由下往上穿越 Signal)
+        if prev_macd < prev_signal and curr_macd > curr_signal:
+            print( stock_data.index[i], "⚡ 黃金交叉")
+            msg = f"{msg}({date})：⚡ 黃金交叉\n"
+            break
+        
+        # 死亡交叉 (MACD 由上往下穿越 Signal)
+        if prev_macd > prev_signal and curr_macd < curr_signal:
+            print( stock_data.index[i], "💀 死亡交叉")
+            msg = f"{msg}({date})：💀 死亡交叉\n"
+            break
+
+
+    """檢查 MACD 是否即將發生交叉"""
+    prev_diff = stock_data['DIFF'].iloc[-2]  # 前一天 Diff
+    curr_diff = stock_data['DIFF'].iloc[-1]  # 當天 Diff
+    
+    threshold=0.05
+    # 檢查交叉門檻
+    if abs(curr_diff) < threshold:
+        if prev_diff < 0 and curr_diff > 0:
+            msg = msg + "目前：⚡ 即將發生黃金交叉(買入)"                        
+        elif prev_diff > 0 and curr_diff < 0:
+            msg = msg + "目前：💀 即將發生死亡交叉(賣出)"
     else:
-        return "無明確信號"
+        msg = msg + "目前：⏳ 尚未接近交叉"
+    
+    return msg
+
+    # return stock_data
+
+    # # 至少需要兩筆資料才能比對交叉
+    # if len(stock_data) < 2:
+    #     return "無明確信號"
+
+    # # 前一筆與當前筆
+    # prev_macd = stock_data['MACD'].iloc[-2]
+    # prev_signal = stock_data['Signal_Line'].iloc[-2]
+    # curr_macd = stock_data['MACD'].iloc[-1]
+    # curr_signal = stock_data['Signal_Line'].iloc[-1]
+
+    # # 判斷交叉情形
+    # if prev_macd <= prev_signal and curr_macd > curr_signal:
+    #     return "買入"
+    # elif prev_macd >= prev_signal and curr_macd < curr_signal:
+    #     return "賣出"
+    # else:
+    #     return "無明確信號"
     
 def calculate_rsi(stock_data, period=14):
     # 計算價格變動
@@ -199,3 +249,23 @@ def decision_based_on_volume(latest_volume, latest_mav, volume_ratio, pvt, cmf, 
 # vroc = -26.42236
 # obv = 60606103
 # prev_obv = 60000000  # 之前的 OBV 值 (這需要存歷史數據)
+
+
+# stock_data = get_stock_data(1102)
+
+# 計算 MACD 與信號線
+# stock_data = calculate_macd(stock_data)
+
+# 繪製 MACD 與信號線圖表
+# plt.figure(figsize=(14, 7))
+# plt.plot(stock_data.index, stock_data['MACD'], label="MACD", color="blue")
+# plt.plot(stock_data.index, stock_data['DEA'], label="DEA", color="red")
+# plt.bar(stock_data.index, stock_data['DIFF'], label="DIFF", color=['green' if v >= 0 else 'red' for v in stock_data['DIFF']], alpha=0.5)
+# plt.title("MACD")
+# plt.xlabel("日期")
+# plt.ylabel("數值")
+# plt.legend()
+# plt.xticks(rotation=45)
+# plt.grid(True)
+# plt.tight_layout()
+# plt.show()
