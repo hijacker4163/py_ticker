@@ -468,7 +468,7 @@ class Stocker():
 
         # Plot formatting
         # plt.rcParams['font.sans-serif'] = ['SimHei']
-        plt.rcParams['font.sans-serif'] = ['Hiragino Sans'] 
+        plt.rcParams['font.sans-serif'] = ['Hiragino Sans GB'] 
         # plt.rcParams['font.sans-serif'] = ['Taipei Sans TC Beta'] 
 
         plt.legend(loc = 2, prop={'size': 10}); plt.xlabel('Date'); plt.ylabel('Price $');
