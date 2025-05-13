@@ -14,7 +14,9 @@ import json
 import os
 import time
 import datetime
+import threading
 from cachetools import TTLCache
+from bs4 import BeautifulSoup
 
 from twstock import Stock
 from twstock import BestFourPoint
@@ -68,13 +70,19 @@ def load_saved_tickers():
 # 取得股票資訊的函數
 def get_stock_info(ticker, utc_8_loc_time):
     # 使用twstock取得中文名稱及股票類型
-    tw_stock = twstock.codes.get(ticker, None)  # 找不到時回傳 None
-    if tw_stock is None:
+    tw_stock_codes = twstock.codes.get(ticker, None)  # 找不到時回傳 None
+    
+    # 使用twstock取得股票價格歷史資料
+    tw_stock = Stock(ticker) 
+
+    if tw_stock_codes is None:
         twTicker = ticker + ".TWO"
-    elif tw_stock.market == "上市":
-      twTicker = ticker + ".TW"    
-    elif tw_stock.market == "上櫃":
-      twTicker = ticker + ".TWO"
+    elif tw_stock_codes.market == "上市":
+        twTicker = ticker + ".TW"
+    elif tw_stock_codes.market == "上櫃":
+        twTicker = ticker + ".TWO"
+
+    print(f"twTicker = {twTicker}")
 
     stock = yf.Ticker(twTicker)
 
@@ -89,6 +97,7 @@ def get_stock_info(ticker, utc_8_loc_time):
     hist63 = stock.history(start=day63, end=today)  # 過去63day的數據
     hist28 = stock.history(start=day28, end=today)  # 過去28day的數據
     hist10 = stock.history(start=day10, end=today)  # 過去10day的數據
+    # hist5 = stock.history(period="5d")  # 取得最近5天的數據，以防有缺失
 
     # 取得財報數據
     eps = stock.info.get("trailingEps", 0)  # 每股盈餘
@@ -106,8 +115,8 @@ def get_stock_info(ticker, utc_8_loc_time):
 
     # 改使用twstock取得股票名稱
     # stock_name = stock.info.get("longName", twTicker)  # 沒有中文名稱
-    # stock_name = tw_stock.name # 使用twstock有中文名稱
-    stock_name = tw_stock.name if tw_stock is not None else stock.info.get("longName", twTicker)
+    # 使用twstock有中文名稱
+    stock_name = tw_stock_codes.name if tw_stock_codes is not None else stock.info.get("longName", twTicker)
 
     low_63 = hist63["Low"].min()  # 取得過去 63 天的最低價
     # print(f"{ticker} - 過去 63 天的最低價: {low_63}")
@@ -134,7 +143,34 @@ def get_stock_info(ticker, utc_8_loc_time):
 
     # 收盤價分析
     avg_close_price = round(np.mean(hist28["Close"]), 2)
-    yesterday_close = round(stock.info.get('regularMarketPreviousClose'), 2)
+
+    # 取得最近兩天的日期
+    # latest_date = hist5.index[-1].strftime("%Y-%m-%d")  # 最新數據的日期
+    # previous_date = hist5.index[-2].strftime("%Y-%m-%d")  # 倒數第二筆數據的日期
+    
+    # latest_date = tw_stock.date[-1].strftime("%Y-%m-%d")  # 最新數據的日期
+    # previous_date = tw_stock.date[-2].strftime("%Y-%m-%d") # 倒數第二筆數據的日期
+
+    # print(f"ticker: {ticker}")
+    # print(f"today: {today}")
+    # print(f"最新數據日期: {latest_date}")
+    # print(f"倒數第二筆數據日期: {previous_date}")
+
+    # 判斷昨日收盤價
+    # if utc_8_loc_time.tm_hour < 9:
+    #   yesterday_close = round(stock.info.get('regularMarketPrice'), 2)
+    # elif utc_8_loc_time.tm_hour < 13 or (utc_8_loc_time.tm_hour == 13 and utc_8_loc_time.tm_min < 30):
+    #   yesterday_close = round(stock.info.get('regularMarketPreviousClose'), 2)
+    # else:
+    #   yesterday_close = round(stock.info.get('regularMarketPrice'), 2)
+
+    if not tw_stock.price:
+        yesterday_close = round(stock.info.get('regularMarketPreviousClose'), 2)
+        # 過13:30可考慮用regularMarketPrice
+    else:
+        yesterday_close = tw_stock.price[-1]  # 昨日收盤價
+
+    # 今日收盤（當前股價）
     if stock.info.get('currentPrice') is None:
         today_close = round(stock.info.get('regularMarketPrice'), 2)
     else:
@@ -157,7 +193,7 @@ def get_stock_info(ticker, utc_8_loc_time):
         estimated_high = round(today_close + volatility, 2)
 
     return {
-        "代號": ticker,
+        "代號": twTicker,
         "名稱": stock_name,
         "EPS": round(eps, 2) if stock.info.get("quoteType") != "ETF" else "ETF",        
         "本益比": round(pe_ratio, 2),
@@ -177,6 +213,7 @@ def get_stock_info(ticker, utc_8_loc_time):
         "殖利率": round(dividend_yield, 2)
     }
 
+# 爬蟲取得殖利率
 def get_dog_yield_rate(code):
     # 嘗試從快取中獲取資料
     if code in cache:
@@ -228,7 +265,7 @@ def add_stock_data():
         # 儲存股號
         save_ticker(ticker)
 
-        update_all_stocks()
+        start_update(loading_window, table, table_columns, status_label)
 
     except Exception as e:
         messagebox.showerror("發生錯誤", f"獲取股票資訊時發生錯誤：{str(e)}")
@@ -257,7 +294,7 @@ def add_stock_data():
 #         # table.insert("", "end", values=[stock_data[key] for key in table_columns])
 
 # 更新所有股票資料
-def update_all_stocks():
+def update_all_stocks(loading_window, table, table_columns, status_label):    
     saved_tickers = load_saved_tickers()
 
     time_stamp = int(time.time())
@@ -273,19 +310,28 @@ def update_all_stocks():
     # 重新插入更新後的股票資料
     for ticker in saved_tickers:
         stock_data = get_stock_info(ticker, time.localtime())
-        table.insert("", "end", values=[stock_data[key] for key in table_columns])
+        # text=ticker 只有股號
+        table.insert("", "end", text=ticker, values=[stock_data[key] for key in table_columns])
 
     # 顯示更新完成的訊息
     status_label.config(text=f"更新完成! 更新時間: {update_time}")
 
+     # 使用 root.after() 在主線程中更新 UI
+    root.after(0, update_ui, loading_window, status_label, update_time)
+
+def update_ui(loading_window, status_label, update_time):
+    # 顯示更新完成的訊息
+    status_label.config(text=f"更新完成! 更新時間: {update_time}")
+    # 隱藏 loading
+    loading_window.withdraw()
+
 # 取得股票歷史數據
-def get_stock_history(ticker_symbol, start_date="2020-01-01", end_date=None):        
-    twTicker = f"{ticker_symbol}.TW"
+def get_stock_history(twTicker, start_date="2020-01-01", end_date=None):       
     stock = yf.Ticker(twTicker)
     
     # 若沒有指定 end_date，則使用當前日期
     if end_date is None:
-        end_date = datetime.today().strftime('%Y-%m-%d')  # 獲取今天的日期
+        end_date = datetime.date.today().strftime('%Y-%m-%d')  # 獲取今天的日期
 
     # 取得股價歷史資料，範圍可以指定，這裡範圍是 2020 年到當前日期
     history = stock.history(start=start_date, end=end_date)
@@ -295,11 +341,13 @@ def get_stock_history(ticker_symbol, start_date="2020-01-01", end_date=None):
 def predict_stock():
     selected_item = table.selection()
     if selected_item:
-        ticker = table.item(selected_item[0])["values"][0]  # 取得選中的股票代號
-        print(f"預測 {ticker} 股票資料")  # 預測功能（目前是 print）
+        twTicker = table.item(selected_item[0])["values"][0]  # 取得選中的台灣股票代號（ex. tw, two）
+        ticker = table.item(selected_item[0])["text"]  # 取得選中的股票代號
 
-        # ticker = "2330.TW"  # 這裡可以更換為任意股票代號
-        stock_data = get_stock_history(ticker)  # 取得股票歷史資料
+        print(f"預測 {twTicker} 股票資料")  # 預測功能（目前是 print）
+
+        # twTicker = "2330.TW"  # 這裡可以更換為任意股票代號
+        stock_data = get_stock_history(twTicker)  # 取得股票歷史資料
 
         # 取出 Close 欄位
         close_prices = stock_data['Close']
@@ -325,10 +373,14 @@ def predict_stock():
         # 顯示錯誤訊息彈出視窗
         messagebox.showwarning("警告", "請選擇一支股票進行預測")
 
+# 技術分析
 def analysis_event():
     selected_item = table.selection()
     if selected_item:
-        ticker = table.item(selected_item[0])["values"][0]  # 取得選中的股票代號
+        print(table.item(selected_item[0]))
+        # ticker = table.item(selected_item[0])["values"][0]  # 取得選中的股票代號
+        ticker = table.item(selected_item[0])["text"]  # 取得選中的股票代號
+        twTicker = table.item(selected_item[0])["values"][0]  # 取得選中的台灣股票代號（ex. tw, two）
         ticker_name = table.item(selected_item[0])["values"][1]  # 取得選中的股票名稱
         print(f"四大買賣點 {ticker}-{ticker_name} 股票資料")
 
@@ -337,11 +389,71 @@ def analysis_event():
         print(f"complex_reason = {complex_reason}")
 
         # 顯示新視窗
-        show_result_window(ticker, ticker_name, buy_reason, sell_reason)
+        show_result_window(ticker, twTicker, ticker_name, buy_reason, sell_reason)
+
+# 大股東持有
+def major_shareholders_hold():
+    selected_item = table.selection()
+    if selected_item:
+        # ticker = table.item(selected_item[0])["values"][0]  # 取得選中的股票代號
+        ticker = table.item(selected_item[0])["text"]
+        ticker_name = table.item(selected_item[0])["values"][1]  # 取得選中的股票名稱
+
+        url = f"https://norway.twsthr.info/StockHolders.aspx?stock={ticker}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+
+        response = requests.get(url, headers=headers)
+        # print(response.text)  # 看看是不是完整 HTML
+
+        # 使用 BeautifulSoup 解析 HTML
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # 找到包含數據的表格（可以根據 <table> id 或 class 進行選擇）
+        soup_table = soup.find('table', {'id': 'Details'})  # 假設表格的 id 是 'Details'
+
+        # 提取所有行（<tr>）
+        rows = soup_table.find_all('tr')
+
+        # 將表格資料提取並整理
+        table_data = []
+        for i, row in enumerate(rows):
+            if i == 10:
+                break
+            # 提取每一行中的所有欄位（<td>）
+            columns = row.find_all('td')
+            
+            # 如果欄位數量不為 0，表示有有效的資料
+            if columns:
+                column_data = [column.text.strip() for column in columns]
+                table_data.append(column_data)
+
+        print(len(table_data))  # 顯示資料筆數
+
+        # 輸出整理後的資料
+        dates = []
+        percentages = []
+
+        for i, row in enumerate(table_data):
+            if i == 0:
+                continue
+            date = row[2]  # 資料日期
+            percentage = row[7]  # >400張大股東持有百分比
+
+            # 把資料加到對應的列表中
+            dates.append(date)
+            percentages.append(percentage)
+
+        # 顯示新視窗
+        show_major_shareholders_hold_window(ticker, ticker_name, dates, percentages)
+        
+        # 返回資料
+        # return dates, percentages
+
+# def futures_valuation_hold():
+
 
 # 下載股價資料的公共函數
-def get_stock_data(ticker, period="60d", interval="1d"):
-    twTicker = f"{ticker}.TW"
+def get_stock_data(twTicker, period="60d", interval="1d"):
     stock_data = yf.download(twTicker, period=period, interval=interval)  # 最近60天資料
     return stock_data
 
@@ -350,10 +462,85 @@ def create_separator(parent):
     separator.pack(fill="x", pady=5)
     return separator
 
-def show_result_window(ticker, ticker_name, buy_reason, sell_reason):
+def show_major_shareholders_hold_window(ticker, ticker_name, dates, percentages):
+    # 建立新視窗
+    result_window = tk.Toplevel()
+    result_window.title(f"{ticker} - {ticker_name} 大股東持有")
+    result_window.geometry("500x200")
+    
+    tk.Label(result_window, text=f"股票: {ticker} - {ticker_name}", font=("Arial", 14, "bold")).pack(pady=10)
+    
+    # 找到上個月底 (A) 和最近一次資料 (B)
+    # 取得最近一次的資料 (B)
+    B = float(percentages[0])  # 假設第一筆資料是最新的數據
+
+    if len(dates) >= 2:
+        # 取得當前年、月
+        current_year = time.strftime("%Y")
+        current_month = time.strftime("%m")
+        print(f"current_month = {current_month}, current_year = {current_year}")
+
+        # 找出上個月底的資料 (A)
+        last_month = str(int(current_month) - 1).zfill(2)  # 轉換成兩位數格式
+        last_month_str = f"{current_year}{last_month}"
+        print(f"last_month_str = {last_month_str}")
+        
+        last_month_end_index = None        
+
+        for i in range(len(dates)):
+            date_str = str(dates[i])  # 轉成字串處理
+            print(f"date_str = {date_str}")
+
+            if date_str.startswith(last_month_str):
+                last_month_end_index = i  # 記錄最後一筆當月資料
+                print(f"找到上個月底的資料: {date_str}")
+                break
+
+        if last_month_end_index is not None:
+            A = float(percentages[last_month_end_index])  # 上個月底的數值
+        else:
+            A = None  # 沒有找到上個月底的資料
+
+        # 計算增幅
+        if A is not None:
+            increase = B - A
+            increase_percentage = (increase / A) * 100 if A != 0 else 0
+            change_text = f"{A:.2f} 變 {B:.2f} 增幅 {increase:.2f} ({increase_percentage:.2f}%)"
+        else:
+            change_text = f"最近一次持股: {B:.2f}（無法計算增幅）"
+    else:
+        change_text = "數據不足，無法計算"
+
+    # 前次
+    increase = float(percentages[0]) - float(percentages[1])
+    increase_percentage = (increase / A) * 100 if A != 0 else 0
+    last_text = f"{float(percentages[1]):.2f} 變 {B:.2f} 增幅 {increase:.2f} ({increase_percentage:.2f}%)"
+
+    # 顯示本月大股東持股變化
+    current_hold_label = tk.Label(result_window, text=f"大股東本月: {change_text}", font=("Arial", 12, "bold"))
+    current_hold_label.pack(pady=5)
+
+    last_hold_label = tk.Label(result_window, text=f"大股東前次: {last_text}", font=("Arial", 12, "bold"))
+    last_hold_label.pack(pady=5)
+
+    # 分隔線
+    create_separator(result_window)
+
+    # 更新時間顯示
+    now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())  # 更新時間
+    update_time_label = tk.Label(result_window, text=f"最後更新時間: {now}", font=("Arial", 10))
+    update_time_label.pack(pady=10)
+
+    # 關閉按鈕
+    tk.Button(result_window, text="關閉", command=result_window.destroy).pack(pady=20)
+
+def show_result_window(ticker, twTicker, ticker_name, buy_reason, sell_reason):
     def update_result():
-        """每 30 秒重新獲取數據並更新 UI"""
-        stock_data = get_stock_data(ticker)
+        """每 xx 秒重新獲取數據並更新 UI"""
+        stock_data = get_stock_data(twTicker)
+        
+        # 更新股價
+        currentPrice.config(text=f"目前股價: {stock_data['Close'].iloc[-1].values[0]}")
         # 計算 MACD 指標的買賣信號
         macd_signal = ca.calculate_macd(stock_data)
         # 計算 RSI
@@ -368,18 +555,39 @@ def show_result_window(ticker, ticker_name, buy_reason, sell_reason):
         cmf = ca.calculate_cmf(stock_data)
         vroc = ca.calculate_vroc(stock_data)
         latest_obv, previous_obv, latest_price, previous_price = ca.calculate_obv(stock_data)
-        print(f"latest_volume: {latest_volume}")
-        print(f"MAV: {latest_mav}")
-        print(f"Volume Ratio: {volume_ratio.values[0]}")
-        print(f"PVT: {pvt}")
-        print(f"CMF: {cmf.values[0]}")
-        print(f"VROC: {vroc.values[0]}")
-        print(f"latest_obv: {latest_obv}")
-        print(f"previous_obv: {previous_obv}")
-        print(f"latest_price: {latest_price}")
-        print(f"previous_price: {previous_price}")
-        result = ca.decision_based_on_volume(latest_volume, latest_mav, volume_ratio.values[0], pvt, cmf.values[0], vroc.values[0], latest_obv, previous_obv, latest_price, previous_price)
 
+        # 補充：
+        price = stock_data["Close"].iloc[-1].values[0]  # 當前價格
+        vwap = ca.calculate_vwap(stock_data).values[0]
+        volume_threshold = latest_mav * 3  # 成交量過濾閾值（300%）
+
+        # print(f"latest_volume: {latest_volume}")
+        # print(f"MAV: {latest_mav}")
+        # print(f"Volume Ratio: {volume_ratio.values[0]}")
+        # print(f"PVT: {pvt}")
+        # print(f"CMF: {cmf.values[0]}")
+        # print(f"VROC: {vroc.values[0]}")
+        # print(f"latest_obv: {latest_obv}")
+        # print(f"previous_obv: {previous_obv}")
+        # print(f"latest_price: {latest_price}")
+        # print(f"previous_price: {previous_price}")
+
+        # 計算 5 日、10 日、20 日乖離率
+        bias_values = ca.calculate_bias(stock_data)
+
+        # 生成乖離率的顯示文字
+        bias_text = ""
+        for period, value in bias_values.items():
+            # 取出 value 中的數值
+            value = value.values[0]
+
+            bias_status = "🔴 正乖離" if value > 0 else "🟢 負乖離"
+            bias_text += f"{period} 日 BIAS: {value:.2f}% ({bias_status})\n"
+
+        result = ca.decision_based_on_volume(latest_volume, latest_mav, volume_ratio.values[0], pvt, cmf.values[0], vroc.values[0], latest_obv, previous_obv, latest_price, previous_price)
+        
+        result_five_orders = ca.calculate_five_orders(ticker, twTicker)
+        
         new_buy_reason, new_sell_reason, complex_reason = ca.get_four_points(ticker)        
 
         # 更新 Label 內容
@@ -388,8 +596,32 @@ def show_result_window(ticker, ticker_name, buy_reason, sell_reason):
         macd_label.config(text=f"MACD(移動平均線): {macd_signal}")  # 顯示 MACD 訊號
         rsi_label.config(text=f"RSI(70⬆超買,30⬇超賣): {new_rsi:.2f}")
         bollinger_label.config(text=f"布林帶: 上軌 {upper_band:.2f}, 下軌 {lower_band:.2f}, 中軌 {sma:.2f}\n決策:{decision}")
+        bias_label.config(text=f"📊 乖離率分析\n正：避免追高買進，未來幾天可能會有一波股價下跌的修正\n負：避免殺低賣出，未來幾天可能會有一波股價上漲的反彈\n{bias_text}")
+
         # 顯示交易量投票結果
         volume_label.config(text=f"{result}")
+
+        # VWAP 判斷
+        if price > vwap:
+            result = (f"📈 當前價格 {price:.2f} 高於 VWAP {vwap:.2f}，市場偏多。")
+            if latest_volume > volume_threshold:
+                result = (f"{result}\n⚠️ 成交量暴增，可能是主力拉高吸引散戶進場！")
+            else:
+                result = (f"{result}\n✅ VWAP 支撐多方，可考慮順勢做多。")
+        elif price < vwap:
+            result = (f"📉 當前價格 {price:.2f} 低於 VWAP {vwap:.2f}，市場偏空。")
+            if latest_volume > volume_threshold:
+                result = (f"{result}\n⚠️ 成交量暴增，可能是主力出貨！")
+            else:
+                result = (f"{result}\n✅ VWAP 壓制空方，可考慮順勢做空。")
+
+        # 假突破判斷
+        if latest_volume > volume_threshold and abs(price - vwap) > 0.02 * vwap:
+            result = (f"{result}\n⚠️ 價格遠離 VWAP 且成交量暴增，警惕假突破！")
+
+        vwap_label.config(text=f"當沖、日內指標：\n{result}")
+
+        five_label.config(text=f"{result_five_orders}")
 
         # 更新時間
         now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -407,10 +639,16 @@ def show_result_window(ticker, ticker_name, buy_reason, sell_reason):
 
     # 建立新視窗
     result_window = tk.Toplevel()
-    result_window.title(f"{ticker} - {ticker_name} 預測結果")
-    result_window.geometry("400x500")
-
-    tk.Label(result_window, text=f"股票: {ticker} - {ticker_name}", font=("Arial", 14, "bold")).pack(pady=10)
+    result_window.title(f"{twTicker} - {ticker_name} 技術分析")
+    result_window.geometry("500x800")
+    
+    stock_data = get_stock_data(twTicker)
+    # print(f"stock_data = {stock_data}")
+    tk.Label(result_window, text=f"股票: {twTicker} - {ticker_name}", font=("Arial", 14, "bold")).pack(pady=10)
+    
+    # 目前股價
+    currentPrice = tk.Label(result_window, text=f"目前股價: {stock_data['Close'].iloc[-1].values[0]}", font=("Arial", 14, "bold"))
+    currentPrice.pack(pady=5)
 
     # 買入訊息
     buy_label = tk.Label(result_window, text=f"✅ 符合四大買點: {buy_reason}" if buy_reason else "❌ 不符合四大買點", fg="green")
@@ -423,7 +661,6 @@ def show_result_window(ticker, ticker_name, buy_reason, sell_reason):
     # 分隔線
     create_separator(result_window)
 
-    stock_data = get_stock_data(ticker)
     # 計算 MACD 指標的買賣信號
     macd_signal = ca.calculate_macd(stock_data)
     # 計算 RSI
@@ -438,6 +675,23 @@ def show_result_window(ticker, ticker_name, buy_reason, sell_reason):
     cmf = ca.calculate_cmf(stock_data)
     vroc = ca.calculate_vroc(stock_data)    
     latest_obv, previous_obv, latest_price, previous_price = ca.calculate_obv(stock_data)
+    # 補充：
+    price = stock_data["Close"].iloc[-1].values[0]  # 當前價格
+    vwap = ca.calculate_vwap(stock_data).values[0]
+    volume_threshold = latest_mav * 3  # 成交量過濾閾值（300%）
+
+    # 計算 5 日、10 日、20 日乖離率
+    bias_values = ca.calculate_bias(stock_data)
+
+    # 生成乖離率的顯示文字
+    bias_text = ""
+    for period, value in bias_values.items():
+        # 取出 value 中的數值
+        value = value.values[0]
+
+        bias_status = "🔴 正乖離" if value > 0 else "🟢 負乖離"
+        bias_text += f"{period} 日 BIAS: {value:.2f}% ({bias_status})\n"
+
     print(f"latest_volume: {latest_volume}")
     print(f"MAV: {latest_mav}")
     print(f"Volume Ratio: {volume_ratio.values[0]}")
@@ -452,6 +706,8 @@ def show_result_window(ticker, ticker_name, buy_reason, sell_reason):
 
     result = ca.decision_based_on_volume(latest_volume, latest_mav, volume_ratio.values[0], pvt, cmf.values[0], vroc.values[0], latest_obv, previous_obv, latest_price, previous_price)
     
+    result_five_orders = ca.calculate_five_orders(ticker, twTicker)
+
     # 顯示 MACD 訊號
     macd_label = tk.Label(result_window, text=f"MACD(移動平均線): {macd_signal}")                          
     macd_label.pack(pady=5)
@@ -473,11 +729,48 @@ def show_result_window(ticker, ticker_name, buy_reason, sell_reason):
     # 分隔線
     create_separator(result_window)
 
-    # 顯示交易量投票結果
-    volume_label = tk.Label(result_window, text=f"{result}")
+    # 顯示乖離率分析結果     
+    bias_label = tk.Label(result_window, text=f"📊 乖離率分析\n正：避免追高買進，未來幾天可能會有一波股價下跌的修正\n負：避免殺低賣出，未來幾天可能會有一波股價上漲的反彈\n{bias_text}")
+    bias_label.pack(pady=10)
+
+    # 分隔線
+    create_separator(result_window)
+
+    # 顯示交易量投票結果  
+    volume_label = tk.Label(result_window, text=f"中長線指標：\n{result}")
     volume_label.pack(pady=10)
 
     # 分隔線
+    create_separator(result_window)
+
+    # VWAP 判斷
+    if price > vwap:
+        result = (f"📈 當前價格 {price:.2f} 高於 VWAP {vwap:.2f}，市場偏多。")
+        if latest_volume > volume_threshold:
+            result = (f"{result}\n⚠️ 成交量暴增，可能是主力拉高吸引散戶進場！")
+        else:
+            result = (f"{result}\n✅ VWAP 支撐多方，可考慮順勢做多。")
+    elif price < vwap:
+        result = (f"📉 當前價格 {price:.2f} 低於 VWAP {vwap:.2f}，市場偏空。")
+        if latest_volume > volume_threshold:
+            result = (f"{result}\n⚠️ 成交量暴增，可能是主力出貨！")
+        else:
+            result = (f"{result}\n✅ VWAP 壓制空方，可考慮順勢做空。")
+
+    # 假突破判斷
+    if latest_volume > volume_threshold and abs(price - vwap) > 0.02 * vwap:
+        result = (f"{result}\n⚠️ 價格遠離 VWAP 且成交量暴增，警惕假突破！")
+
+    vwap_label = tk.Label(result_window, text=f"當沖、日內指標：\n{result}")
+    vwap_label.pack(pady=10)
+
+    # 分隔線
+    create_separator(result_window)
+
+    five_label = tk.Label(result_window, text=f"{result_five_orders}")
+    five_label.pack(pady=10)
+
+     # 分隔線
     create_separator(result_window)
 
     # 更新時間顯示
@@ -491,73 +784,204 @@ def show_result_window(ticker, ticker_name, buy_reason, sell_reason):
     # 啟動自動更新
     result_window.after(30000, update_result)
 
-# 設定GUI界面
-root = tk.Tk()
-root.title("股票資訊查詢")
+def main():
+    # 設定GUI界面
+    global root
+    global ticker_entry
+    global table
+    global loading_window, table_columns, status_label
 
-# 建立一個 Frame 來包裝這些控制元件
-input_frame = tk.Frame(root)
-input_frame.grid(row=0, column=0, sticky="w")  # 用 grid 放置 Frame
+    root = tk.Tk()
+    root.title("股票資訊查詢")
 
-# 輸入股票代號
-ticker_label = tk.Label(input_frame, text="輸入台灣股票代號 (如 2330 或 0050):")
-ticker_label.pack(side="left")
+    # 創建一個頂層視窗用於顯示 Loading，這個視窗會蓋在主視窗上
+    loading_window = tk.Toplevel(root)
+    loading_window.title("Loading")
+    loading_window.geometry("300x300")
+    loading_window.withdraw()  # 預設隱藏 loading 視窗
+    # 創建 loading 標籤
+    loading_label = tk.Label(loading_window, text="Loading...", font=("Arial", 14))
+    loading_label.pack(expand=True)
 
-ticker_entry = tk.Entry(input_frame)
-ticker_entry.pack(side="left")
+    # 建立一個 Frame 來包裝這些控制元件
+    input_frame = tk.Frame(root)
+    input_frame.grid(row=0, column=0, sticky="w")  # 用 grid 放置 Frame
 
-# 按鈕
-add_button = tk.Button(input_frame, text="新增", command=add_stock_data)
-add_button.pack(side="left")
-update_button = tk.Button(input_frame, text="更新所有", command=update_all_stocks)
-update_button.pack(side="left")
+    # 輸入股票代號
+    ticker_label = tk.Label(input_frame, text="輸入台灣股票代號 (如 2330 或 0050):")
+    ticker_label.pack(side="left")
 
-bestFour_button = tk.Button(input_frame, text="技術分析", command=analysis_event)
-predict_button = tk.Button(input_frame, text="預測", command=predict_stock)
-bestFour_button.pack_forget()  # 隱藏技術分析按鈕
-predict_button.pack_forget()  # 隱藏預測按鈕
+    ticker_entry = tk.Entry(input_frame)
+    ticker_entry.pack(side="left")
 
-# 設定表格欄位名稱
-table_columns = [
-    "代號", "名稱", "EPS", "本益比", "平均最低", 
-    "建議買入", "平均最高", "建議賣出", "平均交易量", "今天交易量", 
-    "平均收盤", "昨天收盤", "今天收盤", "趨勢", "震盪", "預估最低", 
-    "預估最高", "殖利率"
-]
+    # 按鈕
+    add_button = tk.Button(input_frame, text="新增", command=add_stock_data)
+    add_button.pack(side="left")
+    # update_button = tk.Button(input_frame, text="更新所有", command=lambda: update_all_stocks(loading_label))
+    update_button = tk.Button(input_frame, text="更新所有", command=lambda: start_update(loading_window, table, table_columns, status_label))
+    update_button.pack(side="left")
 
-# 設定表格
-table = ttk.Treeview(root, columns=table_columns, show="headings", height=10)
-table.grid(row=1, column=0, columnspan=4, padx=10, pady=10)
+    bestFour_button = tk.Button(input_frame, text="技術分析", command=analysis_event)
+    predict_button = tk.Button(input_frame, text="預測", command=predict_stock)
+    ms_hold_button = tk.Button(input_frame, text="大股東持有", command=major_shareholders_hold)
+    # futures_valuation_button = tk.Button(input_frame, text="00715L期貨估值", command=futures_valuation_hold)
+    
+    bestFour_button.pack_forget()  # 隱藏技術分析按鈕
+    predict_button.pack_forget()  # 隱藏預測按鈕
+    ms_hold_button.pack_forget()  
 
-# 設定表格標題
-for col in table_columns:
-    table.heading(col, text=col)
-    table.column(col, width=70, anchor="center")
+    # 設定表格欄位名稱
+    table_columns = [
+        "代號", "名稱", "EPS", "本益比", "平均最低", 
+        "建議買入", "平均最高", "建議賣出", "平均交易量", "今天交易量", 
+        "平均收盤", "昨天收盤", "今天收盤", "趨勢", "震盪", "預估最低", 
+        "預估最高", "殖利率"
+    ]
 
-# 設定紅色字的標籤
-table.tag_configure("red", foreground="red")
-# 設定綠色字的標籤
-table.tag_configure("green", foreground="green")
+    # 設定表格
+    table = ttk.Treeview(root, columns=table_columns, show="headings", height=25)
+    table.grid(row=1, column=0, columnspan=4, padx=10, pady=10)
 
-# 監聽表格選擇事件
-def on_item_select(event):
-    bestFour_button.pack(side="left")
-    predict_button.pack(side="left")
-table.bind("<<TreeviewSelect>>", on_item_select)
+    # 設定表格標題
+    for col in table_columns:
+        table.heading(col, text=col)
+        table.column(col, width=75, anchor="center")
 
-# 顯示更新狀態
-status_label = tk.Label(root, text="尚未更新", anchor="w")
-status_label.grid(row=2, column=0, columnspan=4, sticky="w", padx=10, pady=5)
+    # 設定紅色字的標籤
+    table.tag_configure("red", foreground="red")
+    # 設定綠色字的標籤
+    table.tag_configure("green", foreground="green")
 
-# 在啟動時顯示儲存的股號
-update_all_stocks()
-# display_saved_tickers()
+    # 監聽表格選擇事件
+    def on_item_select(event):
+        bestFour_button.pack(side="left")
+        predict_button.pack(side="left")
+        ms_hold_button.pack(side="left")
+    table.bind("<<TreeviewSelect>>", on_item_select)
+
+    # 顯示更新狀態
+    status_label = tk.Label(root, text="尚未更新", anchor="w")
+    status_label.grid(row=2, column=0, columnspan=4, sticky="w", padx=10, pady=5)    
+
+    # 在啟動時顯示儲存的股號
+    start_update(loading_window, table, table_columns, status_label)    
+    # display_saved_tickers()
+    
+    # 啟動 GUI 界面
+    root.mainloop()
+
+# 開始更新操作
+def start_update(loading_window, table, table_columns, status_label):
+    # 顯示 loading 視窗
+    loading_window.deiconify()  # 顯示 loading 視窗
+    # 在背景執行更新操作
+    threading.Thread(target=update_all_stocks, args=(loading_window, table, table_columns, status_label), daemon=True).start()
 
 # 測試
+# twTicker = "1301.TW"
 # twTicker = "2603.TW"
+# twTicker = "6129.TWO"
 # stock = yf.Ticker(twTicker)
 # print(stock.info)
+# print("========================")
 
-# 啟動 GUI 界面
-root.mainloop()
+# data = stock.history(period="2d")  # 取得最近兩天的數據，以防有缺失
+
+# previous_date = data.index[-2].strftime("%Y-%m-%d")
+# print(f"[1]previous_date = {previous_date}")
+
+# previous_close = data["Close"].iloc[-2]  # 倒數第二筆數據為前一日收盤價
+# print(f"[1]previous_close = {previous_close}")
+
+# previous_date = data.index[-1].strftime("%Y-%m-%d")
+# print(f"[2]previous_date = {previous_date}")
+
+# previous_close = data["Close"].iloc[-1]
+# print(f"[2]previous_close = {previous_close}")
+# print("========================")
+
+# tw_stock = Stock("2603")
+# print(f"tw_stock = {tw_stock.price}")
+# print(f"tw_stock = {tw_stock.date}")
+# print("========================")
+
+# tw_stock = Stock("00712")
+# print(f"00712 tw_stock = {tw_stock.price}")
+# print(f"00712 tw_stock = {tw_stock.date}")
+# print("========================")
+
+# tw_stock = Stock("00715L")
+# print(f"00715L tw_stock = {tw_stock.price}")
+# print(f"00715L tw_stock = {tw_stock.date}")
+# last_date = tw_stock.date[-1]
+# formatted_date = last_date.strftime("%Y-%m-%d")  # 格式化為 'YYYY-MM-DD'
+# print(f"最後一天的日期: {formatted_date}")
+# print("========================")
+
+
+from dotenv import load_dotenv  
+
+# 運行主程式
+if __name__ == "__main__":
+    main()
+
+    STOCK_CHIP_DOMAIN = "https://www.tdcc.com.tw"
+    STOCK_CHIP_URL = f"{STOCK_CHIP_DOMAIN}/portal/zh/smWeb/"
+
+    # load_dotenv()         
+    # token=os.environ.get('FinMind_TOKEN')    
+    # print(token)
+
+    # # 設定請求 URL 和 POST 資料
+    # url = "https://www.tdcc.com.tw/portal/zh/smWeb/qryStock"
+    # payload = {
+    #     "method": "submit",
+    #     "firDate": "20250321",
+    #     "scaDate": "20250321",
+    #     "sqlMethod": "StockNo",
+    #     "stockNo": "6129",
+    #     "stockName": ""
+    # }
+
+    # # 設定 Headers（模擬瀏覽器）
+    # headers = {
+    #     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    #     "Content-Type": "application/x-www-form-urlencoded",
+    # }
+
+    # # 發送 POST 請求
+    # response = requests.post(url, data=payload, headers=headers)
+
+    # # 檢查請求是否成功
+    # if response.status_code == 200:
+    #     # 解析 HTML
+    #     soup = BeautifulSoup(response.text, "html.parser")        
+
+    #     # 找到表格
+    #     table = soup.find("div", class_="table-frame securities-overview m-t-20")
+
+    #     if table:
+    #         rows = table.find_all("tr")[1:]  # 跳過表頭
+    #         data_list = []
+
+    #         for row in rows:
+    #             cols = row.find_all("td")
+    #             if len(cols) == 5:
+    #                 data = {
+    #                     "序": cols[0].text.strip(),
+    #                     "持股/單位數分級": cols[1].text.strip(),
+    #                     "人數": cols[2].text.strip(),
+    #                     "股數/單位數": cols[3].text.strip(),
+    #                     "占集保庫存數比例 (%)": cols[4].text.strip(),
+    #                 }
+    #                 data_list.append(data)
+
+    #         # 印出結果
+    #         for item in data_list:
+    #             print(item)
+    #     else:
+    #         print("找不到表格")
+    # else:
+    #     print("請求失敗，狀態碼：", response.status_code)
+
 
