@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 
 import requests
 
+from ta.momentum import StochasticOscillator
+
 def get_stock_data(ticker, period="60d", interval="1d"):
     twTicker = f"{ticker}.TW"
     stock_data = yf.download(twTicker, period=period, interval=interval)  # 最近60天資料
@@ -31,6 +33,88 @@ def get_four_points(ticker):
     except Exception as e:
         # 可以記錄錯誤，或回傳錯誤訊息
         return f"錯誤：{e}", f"錯誤：{e}", f"錯誤：{e}"
+
+def calculate_kd(data, k_period=9, d_period=3):
+    """
+    計算 KD 指標
+    data: pandas.DataFrame 必須包含 'High', 'Low', 'Close' 欄位
+    k_period: 計算K值用的期間 (例如9天)
+    d_period: 計算D值用的期間 (例如3天)
+    """
+
+    # 計算最近k_period的最高價、最低價
+    low_min = data['Low'].rolling(window=k_period, min_periods=1).min()
+    high_max = data['High'].rolling(window=k_period, min_periods=1).max()
+
+    # 計算 RSV (Raw Stochastic Value)
+    rsv = (data['Close'] - low_min) / (high_max - low_min) * 100
+
+    # 計算 %K，通常用 RSV 平滑3天，但這裡先用 RSV 本身
+    k = rsv.ewm(com=d_period-1, adjust=False).mean()
+
+    # 計算 %D，對 %K 取移動平均
+    d = k.ewm(com=d_period-1, adjust=False).mean()
+
+    # 把結果加回原資料
+    data['K'] = k
+    data['D'] = d
+
+    print(f"data['K'] = {data['K'].iloc[-1]}")
+    print(f"data['D'] = {data['D'].iloc[-1]}")
+
+    return data
+
+def check_kd_signal(data):
+    """
+    判斷黃金交叉與死亡交叉，並在 DataFrame 新增欄位 'signal'，
+    1 表示黃金交叉買進訊號，
+    -1 表示死亡交叉賣出訊號，
+    0 表示無訊號
+    """
+    signal = []
+    for i in range(len(data)):
+        if i == 0:
+            signal.append(0)  # 第一筆沒法判斷交叉
+        else:
+            k_today = data['K'].iloc[i]
+            d_today = data['D'].iloc[i]
+            k_yesterday = data['K'].iloc[i - 1]
+            d_yesterday = data['D'].iloc[i - 1]
+
+            if k_yesterday < d_yesterday and k_today > d_today:
+                # 黃金交叉
+                signal.append(1)
+            elif k_yesterday > d_yesterday and k_today < d_today:
+                # 死亡交叉
+                signal.append(-1)
+            else:
+                signal.append(0)
+    data['signal'] = signal
+    return data
+    # data = data.reset_index()  # 讓 Ticker 和 Date 變成欄位
+
+    # signal = []
+    # for i in range(len(data)):
+    #     if i == 0:
+    #         signal.append(0)
+    #     else:
+    #         k_today = data['K'].iloc[i]
+    #         d_today = data['D'].iloc[i]
+    #         k_yesterday = data['K'].iloc[i - 1]
+    #         d_yesterday = data['D'].iloc[i - 1]
+
+    #         if k_yesterday < d_yesterday and k_today > d_today:
+    #             # 黃金交叉
+    #             signal.append(1)
+    #         elif k_yesterday > d_yesterday and k_today < d_today:
+    #             # 死亡交叉
+    #             signal.append(-1)
+    #         else:
+    #             signal.append(0)
+
+    # data['signal'] = signal
+    # return data  # 傳回已 reset index 的資料
+
 
 def calculate_macd(stock_data):
     # 計算 12 日和 26 日指數移動平均線 (EMA)
@@ -372,7 +456,39 @@ def calculate_five_orders(ticker, twTicker):
 
 # stock_data = get_stock_data(1102)
 # stock_data = get_stock_data(2330)
-# stock_data = get_stock_data(2603)
+stock_data = get_stock_data(2603)
+
+kd_data = calculate_kd(stock_data)
+
+# 查看有訊號的日期
+kd_data = check_kd_signal(kd_data)
+signals = kd_data[kd_data['signal'] != 0]
+
+# signal_value = signals.iloc[-1]['signal']  # 1: 黃金交叉, -1: 死亡交叉
+# print(f"signal_value = {signal_value}")
+
+d_value = signals['D'].iloc[-1]
+print(f"d_value = {d_value}")
+
+signal_value = signals['signal'].iloc[-1]
+print(f"signal_value = {signal_value}")
+
+# Price               K          D signal
+# Ticker                                 
+# Date  
+
+date_value = signals.index[-1]
+print(f"date_value = {date_value.strftime('%Y-%m-%d')}")
+
+
+print(signals[['K', 'D', 'signal']])
+# print(f"signals = {signals.iloc[-1]['Date']}")
+# 單除印出signal
+# print(kd_data[['K', 'D', 'signal']])
+# print(kd_data[['K', 'D', 'signal']].iloc[-1])
+# print(kd_data[['K', 'D', 'signal']].iloc[-1]['signal'])
+# print(f"signal = {kd_data['signal'].iloc[-1]}")
+
 
 # 計算乖離率
 # bias_values = calculate_bias(stock_data)
