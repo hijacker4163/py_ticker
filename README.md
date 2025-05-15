@@ -81,3 +81,7 @@ pip install numpy pandas
 
 ### 引用
 stocker 取自 https://github.com/WillKoehrsen/Data-Analysis
+
+### 
+2025/05/15新增FinMind，pip install 之後請執行 pip uninstall simplejson -y
+因此引用會導致程式異常。

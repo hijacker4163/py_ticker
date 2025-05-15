@@ -453,7 +453,7 @@ def major_shareholders_hold():
 
 # def futures_valuation_hold():
 
-def export_data_hold():
+def export_data_hold():    
     selected_item = table.selection()
     ticker = table.item(selected_item[0])["text"]
     ticker_name = table.item(selected_item[0])["values"][1]  # 取得選中的股票名稱

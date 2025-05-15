@@ -8,8 +8,6 @@ import matplotlib.pyplot as plt
 
 import requests
 
-from ta.momentum import StochasticOscillator
-
 def get_stock_data(ticker, period="60d", interval="1d"):
     twTicker = f"{ticker}.TW"
     stock_data = yf.download(twTicker, period=period, interval=interval)  # 最近60天資料
@@ -456,38 +454,26 @@ def calculate_five_orders(ticker, twTicker):
 
 # stock_data = get_stock_data(1102)
 # stock_data = get_stock_data(2330)
-stock_data = get_stock_data(2603)
+# stock_data = get_stock_data(2603)
 
-kd_data = calculate_kd(stock_data)
+# kd_data = calculate_kd(stock_data)
 
-# 查看有訊號的日期
-kd_data = check_kd_signal(kd_data)
-signals = kd_data[kd_data['signal'] != 0]
+# # 查看有訊號的日期
+# kd_data = check_kd_signal(kd_data)
+# signals = kd_data[kd_data['signal'] != 0]
 
-# signal_value = signals.iloc[-1]['signal']  # 1: 黃金交叉, -1: 死亡交叉
+# d_value = signals['D'].iloc[-1]
+# print(f"d_value = {d_value}")
+
+# signal_value = signals['signal'].iloc[-1]   # 1: 黃金交叉, -1: 死亡交叉
 # print(f"signal_value = {signal_value}")
 
-d_value = signals['D'].iloc[-1]
-print(f"d_value = {d_value}")
-
-signal_value = signals['signal'].iloc[-1]
-print(f"signal_value = {signal_value}")
-
-# Price               K          D signal
-# Ticker                                 
-# Date  
-
-date_value = signals.index[-1]
-print(f"date_value = {date_value.strftime('%Y-%m-%d')}")
-
-
-print(signals[['K', 'D', 'signal']])
-# print(f"signals = {signals.iloc[-1]['Date']}")
-# 單除印出signal
-# print(kd_data[['K', 'D', 'signal']])
-# print(kd_data[['K', 'D', 'signal']].iloc[-1])
-# print(kd_data[['K', 'D', 'signal']].iloc[-1]['signal'])
-# print(f"signal = {kd_data['signal'].iloc[-1]}")
+# # Price               K          D signal
+# # Ticker                                 
+# # Date  
+# date_value = signals.index[-1]
+# print(f"date_value = {date_value.strftime('%Y-%m-%d')}")
+# print(signals[['K', 'D', 'signal']])
 
 
 # 計算乖離率
